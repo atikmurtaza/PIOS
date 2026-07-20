@@ -127,8 +127,9 @@ def brief(con=Depends(_con)):
 @app.get("/api/timeline")
 def timeline(con=Depends(_con)):
     now = time.time()
-    eps = db.episodes_between(con, _midnight(), now)
-    events = db.recent_events(con, _midnight() - 86400)[-50:]
+    start = memory.day_start(now)   # not strict midnight — see memory.day_start
+    eps = db.episodes_between(con, start, now)
+    events = db.recent_events(con, start - 86400)[-50:]
     return {"episodes": [dict(e) for e in eps],
             "events": [dict(e) for e in events]}
 

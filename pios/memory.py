@@ -32,7 +32,29 @@ def _ymd(ts):
     return time.strftime("%Y-%m-%d", time.localtime(ts))
 
 
+DAY_LOOKBACK_S = 6 * 3600
+
+
+def day_start(now=None):
+    """Start of the visible 'today' window.
+
+    Not simply midnight: someone working at 00:30 is mid-session, and a strict
+    calendar day blanks the Today view of everything they just did. Always
+    reach back at least DAY_LOOKBACK_S so late-night work stays visible.
+    """
+    now = now if now is not None else time.time()
+    return min(_midnight(now), now - DAY_LOOKBACK_S)
+
+
 RESUME_GAP_S = 30 * 60          # a >30-min gap ends the current work span
+
+# Both question types reach the same model. It must ground claims about the
+# user's activity in the log, but stay a normal, useful assistant for general
+# questions the log has nothing to say about.
+SYSTEM_PROMPT = (
+    "You are the user's personal assistant. You have access to a log of their "
+    "computer activity. Ground any claim about what they did in that log and "
+    "cite it; answer general questions normally from your own knowledge.")
 
 
 def _heuristic_summary(block):
@@ -321,28 +343,39 @@ def build_prompt(question, sections, web=False):
     framing and output spec.
     """
     body = "\n\n".join("## %s\n%s" % (h, "\n".join(ls)) for h, ls in sections)
+    # Two kinds of question arrive here and they need opposite handling.
+    # "What was I working on?" must be answered ONLY from the log. "How do I
+    # do X in Google Sheets?" is general knowledge the log says nothing about
+    # — an earlier version told the model to answer only from context either
+    # way, so it refused perfectly answerable questions.
+    rules = (
+        "The context above is my personal activity log. It may or may not be "
+        "relevant to my question.\n"
+        "- If I'm asking about MY OWN activity, work, or history: answer only "
+        "from the context and cite the entries you used by their [fact N] / "
+        "[episode N] tags. If the context doesn't cover it, say so plainly "
+        "rather than guessing.\n"
+        "- If I'm asking a GENERAL question (how something works, how to do "
+        "something, an explanation): just answer it properly from your own "
+        "knowledge. Don't force the context in, and don't refuse because the "
+        "log doesn't mention it. Use the context only if it genuinely adds "
+        "something — e.g. it shows which tool or project I'm using.\n"
+        "- Never state anything about my activity that isn't in the context.")
     if not web:
-        return ("Context from the user's activity memory:\n%s\n\nQuestion: %s\n\n"
-                "Answer using ONLY the context above. Cite the entries you used "
-                "by their [fact N] / [episode N] tags. If the context does not "
-                "contain the answer, say so plainly."
-                % (body, question))
+        return ("Context from the user's activity memory:\n%s\n\n"
+                "Question: %s\n\n%s" % (body, question, rules))
     return (
-        "You are helping me interpret my own computer-activity log. Below is "
-        "context exported from PIOS, a local tool that records which "
-        "application and window I had in focus and for how long. Personal "
-        "details have been replaced with placeholders like [email-1] — treat "
-        "them as opaque and do not ask about them.\n\n"
+        "You are helping me with a question. Below is context exported from "
+        "PIOS, a local tool that records which application and window I had "
+        "in focus and for how long. Personal details have been replaced with "
+        "placeholders like [email-1] — treat them as opaque and do not ask "
+        "about them.\n\n"
         "%s\n\n"
         "## My question\n%s\n\n"
-        "## How to answer\n"
-        "- Use only the context above; it is all you have about me.\n"
-        "- Cite the entries you rely on by their [fact N] / [episode N] tags.\n"
-        "- If the context doesn't answer it, say so in one line and stop — "
-        "don't speculate about my activity.\n"
-        "- Be concise and concrete. Lead with the answer, then the evidence.\n"
+        "## How to answer\n%s\n"
+        "- Be concise and concrete. Lead with the answer, then any evidence.\n"
         "- Plain prose or short bullets. No preamble, no restating the question."
-        % (body, question))
+        % (body, question, rules))
 
 
 def answer(con, question, cloud=False):
@@ -367,11 +400,13 @@ def _answer_local(con, question, sections, sources, eps, prefix=""):
     if sections and llm.available():
         result = llm.complete(
             build_prompt(question, sections),
-            system="You answer questions about the user's own computer "
-                   "activity strictly from the provided context.")
+            system=SYSTEM_PROMPT)
     if result:
+        # No fallback to "all retrieved": if the model cited nothing then the
+        # answer wasn't grounded in the log (a general question), and listing
+        # every episode we happened to retrieve is a false provenance claim.
         cited = [i for i in sources
-                 if re.search(r"episode\s+%d\b" % i, result)] or sources
+                 if re.search(r"episode\s+%d\b" % i, result)]
         return {"answer": prefix + result.strip(), "sources": cited,
                 "model": llm.model_name()}
     if eps:
@@ -425,11 +460,10 @@ def _answer_cloud(con, question, sections, sources, eps):
         db.log_egress(con, provs, clean, 1)  # EXACT bytes, logged before sending
         text, used, error = cloud.complete(
             clean, cfg=cfg,
-            system="You answer questions about the user's own computer "
-            "activity strictly from the provided context.")
+            system=SYSTEM_PROMPT)
         if text:
             cited = [i for i in sources
-                     if re.search(r"episode\s+%d\b" % i, text)] or sources
+                     if re.search(r"episode\s+%d\b" % i, text)]
             return {"answer": text.strip(), "sources": cited,
                     "model": "%s (cloud)" % used, "redactions": redactions}
         db.log_egress(con, used or provs, "cloud call failed: %s" % error, 0)
@@ -455,18 +489,22 @@ def _answer_cloud(con, question, sections, sources, eps):
 def build_brief(con):
     """Today (+yesterday) brief: time per app, notable episodes, last activity."""
     now = time.time()
-    midnight = _midnight(now)
-    events = db.recent_events(con, midnight - 86400)
-    today = [e for e in events if e["ts"] >= midnight and e["source"] == "window"]
+    start = day_start(now)          # extends past midnight for late sessions
+    events = db.recent_events(con, start - 86400)
+    today = [e for e in events if e["ts"] >= start and e["source"] == "window"]
 
     app_min = Counter()
     for e in today:
         app_min[e["app"] or "?"] += (e["dur_s"] or 0) / 60
-    eps = db.episodes_between(con, midnight - 86400, now)
+    eps = db.episodes_between(con, start - 86400, now)
 
     lines = ["Brief for %s" % _day(now)]
     if app_min:
-        lines.append("Time by app today: " + ", ".join(
+        # say which window the totals cover, so a post-midnight brief that
+        # includes yesterday evening isn't quietly mislabelled "today"
+        label = ("today" if start == _midnight(now)
+                 else "since %s" % _hm(start))
+        lines.append("Time by app %s: " % label + ", ".join(
             "%s %d min" % (a, m) for a, m in app_min.most_common(5)))
     else:
         lines.append("No window activity recorded today.")

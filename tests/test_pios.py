@@ -199,3 +199,45 @@ def test_api_config_get_post(client):
     assert "evil_key" not in j2["config"]
     assert "restart" in j2["note"].lower()
     assert config.load()["window_sensor"] is False  # persisted
+
+
+# ---------- regressions ----------
+
+def test_prompt_permits_general_questions():
+    """Both prompts once said "answer using ONLY the context", so even a
+    frontier model refused questions the activity log cannot cover."""
+    sections = [("Relevant past activity", ["[episode 1] worked on billing"])]
+    for web in (False, True):
+        low = memory.build_prompt("how do I timestamp a row in Sheets?",
+                                  sections, web=web).lower()
+        assert "general" in low, web
+        assert "your own knowledge" in low, web
+
+
+def test_uncited_answer_claims_no_sources(con, monkeypatch):
+    """An answer citing nothing used to report every retrieved episode as its
+    source — false provenance in a system built on provenance."""
+    _ep(con, "worked on billing.py in Code.exe")
+    monkeypatch.setattr(llm, "available", lambda: True)
+    monkeypatch.setattr(llm, "complete",
+                        lambda *a, **k: "Use an Apps Script onEdit() trigger.")
+    assert memory.answer(con, "how do I timestamp a row in Sheets?")["sources"] == []
+
+
+def test_cited_answer_keeps_its_source(con, monkeypatch):
+    ep = _ep(con, "worked on billing.py in Code.exe")
+    monkeypatch.setattr(llm, "available", lambda: True)
+    monkeypatch.setattr(llm, "complete",
+                        lambda *a, **k: "You were on billing [episode %d]." % ep)
+    # query must share keywords with the summary — retrieval is FTS, so
+    # "what was I doing?" matches nothing and there'd be no source to keep
+    assert memory.answer(con, "billing")["sources"] == [ep]
+
+
+def test_day_start_survives_after_midnight():
+    """At 00:30 a strict calendar day blanks the Today view of the session the
+    user is still in the middle of."""
+    lt = time.localtime()
+    midnight = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    assert memory.day_start(midnight + 1800) < midnight     # 00:30 reaches back
+    assert memory.day_start(midnight + 15 * 3600) == midnight  # 15:00 does not
