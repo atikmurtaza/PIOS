@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PIOS</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2a3240;
+    --text:#e6edf3; --dim:#8b949e; --accent:#58a6ff; --good:#3fb950;
+    --bad:#f85149; --warn:#d29922;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);
+       font:15px/1.5 "Segoe UI",system-ui,sans-serif;min-height:100vh}
+  header{display:flex;align-items:center;gap:16px;padding:14px 22px;
+         background:var(--panel);border-bottom:1px solid var(--border)}
+  header h1{font-size:20px;letter-spacing:2px}
+  header h1 span{color:var(--accent)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+       background:var(--dim);margin-right:5px;vertical-align:baseline}
+  .dot.on{background:var(--good)} .dot.off{background:var(--bad)}
+  .pill{font-size:12.5px;color:var(--dim)}
+  #stats{margin-left:auto;font-size:12.5px;color:var(--dim)}
+  nav{display:flex;gap:2px;padding:0 22px;background:var(--panel);
+      border-bottom:1px solid var(--border)}
+  nav button{background:none;border:none;color:var(--dim);padding:10px 16px;
+             font:inherit;font-size:14px;cursor:pointer;
+             border-bottom:2px solid transparent}
+  nav button.active{color:var(--text);border-bottom-color:var(--accent)}
+  nav button:hover{color:var(--text)}
+  main{max-width:860px;margin:0 auto;padding:22px}
+  .tab{display:none} .tab.active{display:block}
+  h2{font-size:15px;color:var(--dim);text-transform:uppercase;
+     letter-spacing:1px;margin:18px 0 10px}
+  .card{background:var(--panel);border:1px solid var(--border);
+        border-radius:8px;padding:14px 16px;margin-bottom:10px}
+  button.btn{background:var(--panel2);border:1px solid var(--border);
+             color:var(--text);padding:7px 14px;border-radius:6px;
+             font:inherit;font-size:13.5px;cursor:pointer}
+  button.btn:hover{border-color:var(--accent)}
+  button.btn.danger{color:var(--bad)}
+  input[type=text]{background:var(--panel2);border:1px solid var(--border);
+        color:var(--text);padding:8px 12px;border-radius:6px;font:inherit;
+        width:100%}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  /* chat */
+  #chatlog{display:flex;flex-direction:column;gap:10px;min-height:200px;
+           margin-bottom:14px}
+  .msg{max-width:85%;padding:10px 14px;border-radius:10px;white-space:pre-wrap}
+  .msg.user{align-self:flex-end;background:#1f3a5f}
+  .msg.pios{align-self:flex-start;background:var(--panel)}
+  .msg .meta{display:block;margin-top:6px;font-size:12px;color:var(--dim)}
+  #chatform{display:flex;gap:8px}
+  /* today */
+  #brief{white-space:pre-wrap}
+  .row{display:flex;gap:10px;align-items:baseline;padding:6px 0;
+       border-bottom:1px solid var(--border);font-size:14px}
+  .row:last-child{border-bottom:none}
+  .row .t{color:var(--dim);min-width:52px;font-variant-numeric:tabular-nums}
+  .row .d{color:var(--accent);min-width:64px;text-align:right}
+  /* memory */
+  .ep{display:flex;gap:10px;align-items:flex-start}
+  .ep .body{flex:1}
+  .ep .when{font-size:12.5px;color:var(--dim)}
+  /* privacy */
+  label.toggle{display:flex;align-items:center;gap:10px;padding:6px 0;
+               cursor:pointer}
+  textarea{background:var(--panel2);border:1px solid var(--border);
+           color:var(--text);padding:8px 12px;border-radius:6px;font:inherit;
+           font-size:13.5px;width:100%;min-height:70px;resize:vertical}
+  .note{font-size:12.5px;color:var(--warn);margin-top:6px}
+  .quiet{color:var(--dim);font-size:13.5px}
+  code{background:var(--panel2);padding:2px 6px;border-radius:4px;
+       font-size:13px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PI<span>OS</span></h1>
+  <span class="pill"><span class="dot" id="dot-core"></span>core</span>
+  <span class="pill"><span class="dot" id="dot-ollama"></span>ollama</span>
+  <span id="stats"></span>
+</header>
+
+<nav>
+  <button data-tab="chat" class="active">Chat</button>
+  <button data-tab="today">Today</button>
+  <button data-tab="memory">Memory</button>
+  <button data-tab="privacy">Privacy</button>
+</nav>
+
+<main>
+
+<section id="tab-chat" class="tab active">
+  <div id="chatlog"><div class="quiet">Ask about your own activity — e.g. “what was I working on this morning?”</div></div>
+  <form id="chatform">
+    <input type="text" id="chatinput" placeholder="Ask your memory..." autocomplete="off">
+    <button class="btn" type="submit">Send</button>
+  </form>
+  <label class="toggle" style="margin-top:8px;font-size:12.5px" title="When on, hard questions go to a cloud model — sanitized and logged in the Privacy tab. Off = fully local.">
+    <input type="checkbox" id="chat-cloud"> Use cloud model for this question
+    <span class="quiet" id="cloud-hint"></span>
+  </label>
+</section>
+
+<section id="tab-today" class="tab">
+  <div style="display:flex;gap:8px;margin-bottom:12px">
+    <button class="btn" id="refresh-today">Refresh</button>
+    <button class="btn" id="episodize-now">Build episodes now</button>
+    <button class="btn" id="resume-now">Where was I?</button>
+    <span class="quiet" id="today-msg" style="align-self:center"></span>
+  </div>
+  <div class="card" id="resume-card" style="display:none;border-color:var(--accent)"></div>
+  <h2>Brief</h2>
+  <div class="card" id="brief">…</div>
+  <h2>Episodes today</h2>
+  <div class="card" id="episodes"><span class="quiet">…</span></div>
+  <h2>Recent activity</h2>
+  <div class="card" id="events"><span class="quiet">…</span></div>
+</section>
+
+<section id="tab-memory" class="tab">
+  <form id="memform" style="display:flex;gap:8px;margin-bottom:12px">
+    <input type="text" id="meminput" placeholder="Search your memories (empty = recent)..." autocomplete="off">
+    <button class="btn" type="submit">Search</button>
+  </form>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+    <h2 style="margin:0">Facts PIOS has learned</h2>
+    <button class="btn" id="consolidate-now" style="margin-left:auto">Distill facts now</button>
+  </div>
+  <div id="factlist"></div>
+  <h2>Episodes</h2>
+  <div id="memlist"></div>
+</section>
+
+<section id="tab-privacy" class="tab">
+  <h2>Sensors</h2>
+  <div class="card">
+    <label class="toggle"><input type="checkbox" id="cfg-window"> Window sensor <span class="quiet">(active window title + app name, every few seconds)</span></label>
+    <label class="toggle"><input type="checkbox" id="cfg-file"> File sensor <span class="quiet">(file change events in watched folders)</span></label>
+    <label class="toggle"><input type="checkbox" id="cfg-git"> Git sensor <span class="quiet">(branch switches + commit subjects — never diffs or code)</span></label>
+    <div style="margin-top:10px">
+      <div class="quiet" style="margin-bottom:6px">Watched folders (one per line):</div>
+      <textarea id="cfg-folders" spellcheck="false"></textarea>
+    </div>
+    <div style="margin-top:10px">
+      <div class="quiet" style="margin-bottom:6px">Git repositories (one path per line):</div>
+      <textarea id="cfg-repos" spellcheck="false" placeholder="C:\Users\you\Projects\my-repo"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button class="btn" id="git-import">Import commit history</button>
+        <span class="quiet" id="git-import-msg">Back-fills memory with past commits so day one isn’t empty.</span>
+      </div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+      <button class="btn" id="cfg-save">Save</button>
+      <span class="note">Sensor changes take effect after restarting PIOS.</span>
+    </div>
+  </div>
+  <h2>Cloud routing</h2>
+  <div class="card">
+    <label class="toggle"><input type="checkbox" id="cfg-cloud"> Allow cloud model for hard questions
+      <span class="quiet">(off = fully local; nothing ever leaves this machine)</span></label>
+    <label class="toggle"><input type="checkbox" id="cfg-paid"> Allow paid APIs (Claude / OpenAI)
+      <span class="quiet">(off = free Gemini tier and manual web assist only)</span></label>
+    <p class="quiet" id="cloud-status" style="margin-top:6px"></p>
+    <p class="note">Routing order: local model → free <code>GEMINI_API_KEY</code> tier →
+      paid APIs (only if allowed above) → manual web assist (no key needed).
+      Keys are read from the environment only — never stored by PIOS.
+      Free Gemini key: aistudio.google.com/apikey</p>
+  </div>
+  <h2>Egress log</h2>
+  <div class="card">
+    <p class="quiet" id="egress-expl">…</p>
+    <div id="egress-rows"></div>
+  </div>
+  <h2>Your data</h2>
+  <div class="card quiet">
+    Everything PIOS knows lives on this machine in
+    <code id="data-dir">…</code>.
+    Delete individual memories from the Memory tab.
+  </div>
+</section>
+
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const api = (path, opts) => fetch(path, opts).then(r => {
+  if (!r.ok) throw new Error(path + " -> " + r.status);
+  return r.json();
+});
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function fmtDur(s){
+  s = Math.round(s || 0);
+  if (s < 60) return s + "s";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + " min";
+  return (m / 60).toFixed(1) + " h";
+}
+function fmtTime(ts){
+  return new Date(ts * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+}
+function fmtWhen(ts){
+  const d = new Date(ts * 1000), today = new Date();
+  const day = d.toDateString() === today.toDateString() ? "Today"
+            : d.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"});
+  return day + " " + fmtTime(ts);
+}
+
+/* tabs */
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+  b.classList.add("active");
+  $("tab-" + b.dataset.tab).classList.add("active");
+  if (b.dataset.tab === "today") loadToday();
+  if (b.dataset.tab === "memory") loadMemory();
+  if (b.dataset.tab === "privacy") loadPrivacy();
+});
+
+/* header status */
+let statusOk = false;
+async function loadStatus(){
+  try {
+    const s = await api("/api/status");
+    statusOk = true;
+    $("dot-core").className = "dot on";
+    $("dot-ollama").className = "dot " + (s.ollama ? "on" : "off");
+    $("stats").textContent = s.db.events + " events · " + s.db.episodes +
+      " episodes · v" + s.version;
+    $("data-dir").textContent = s.data_dir;
+  } catch (e) {
+    $("dot-core").className = "dot off";
+    $("dot-ollama").className = "dot off";
+    $("stats").textContent = "server starting… (your memory is safe on disk)";
+  }
+}
+loadStatus();
+setInterval(loadStatus, 15000);
+// fast retries until first success, so a slow server start never reads as "no data"
+const boot = setInterval(() => statusOk ? clearInterval(boot) : loadStatus(), 2000);
+
+/* chat */
+$("chatform").onsubmit = async ev => {
+  ev.preventDefault();
+  const q = $("chatinput").value.trim();
+  if (!q) return;
+  $("chatinput").value = "";
+  const log = $("chatlog");
+  log.insertAdjacentHTML("beforeend",
+    '<div class="msg user">' + esc(q) + '</div>');
+  const pending = document.createElement("div");
+  pending.className = "msg pios";
+  pending.textContent = "Thinking…";
+  log.appendChild(pending);
+  pending.scrollIntoView();
+  try {
+    const r = await api("/api/chat", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({message: q, cloud: $("chat-cloud").checked})
+    });
+    const src = r.sources.length
+      ? "sources: episode " + r.sources.join(", episode ") : "no sources";
+    let meta = esc(src) + " · answered by " + esc(r.model);
+    if (r.redactions && r.redactions.length)
+      meta += " · redacted before sending: " + esc(r.redactions.join(", "));
+    pending.innerHTML = esc(r.answer) + '<span class="meta">' + meta + "</span>";
+    if (r.assist) showAssist(r.assist);
+  } catch (e) {
+    pending.innerHTML = '<span style="color:var(--bad)">Error: ' + esc(e.message) + "</span>";
+  }
+  pending.scrollIntoView();
+};
+
+/* manual cloud assistant (Amendment A): scrubbed prompt -> clipboard ->
+   web AI in a new tab -> user pastes the reply back -> stored with provenance */
+let assistProvider = "web";
+function showAssist(a){
+  const log = $("chatlog");
+  const box = document.createElement("div");
+  box.className = "msg pios";
+  box.style.borderLeft = "3px solid var(--accent)";
+  box.innerHTML =
+    "<strong>Manual web assist</strong><br>" +
+    '<span class="quiet">No API could answer. Pick a free web AI — the ' +
+    "sanitized prompt is copied to your clipboard; paste it there, then " +
+    "paste the reply back below." +
+    (a.redactions.length ? " Hidden before copying: " + esc(a.redactions.join(", ")) + "." : "") +
+    "</span>" +
+    '<div style="display:flex;gap:8px;margin:10px 0">' +
+    a.providers.map(p =>
+      '<button class="btn" data-assist-url="' + esc(p.url) + '" data-assist-name="' +
+      esc(p.name) + '">' + esc(p.name) +
+      (p.name === a.recommended ? " ★" : "") + "</button>").join("") +
+    "</div>" +
+    '<textarea class="assist-prompt" readonly style="min-height:54px;font-size:12px"></textarea>' +
+    '<textarea class="assist-reply" placeholder="Paste the web AI’s reply here..." style="margin-top:8px"></textarea>' +
+    '<div style="display:flex;gap:8px;margin-top:8px;align-items:center">' +
+    '<button class="btn assist-import">Save answer to memory</button>' +
+    '<span class="quiet assist-status"></span></div>';
+  box.querySelector(".assist-prompt").value = a.prompt;
+  box.querySelectorAll("[data-assist-url]").forEach(b => b.onclick = async () => {
+    assistProvider = b.dataset.assistName;
+    try { await navigator.clipboard.writeText(a.prompt); } catch (e) {
+      box.querySelector(".assist-prompt").select();
+      document.execCommand("copy");
+    }
+    box.querySelector(".assist-status").textContent =
+      "Prompt copied — paste it into " + assistProvider + ", then paste the reply back here.";
+    window.open(b.dataset.assistUrl, "_blank");
+  });
+  box.querySelector(".assist-import").onclick = async () => {
+    const reply = box.querySelector(".assist-reply").value.trim();
+    if (!reply) { box.querySelector(".assist-status").textContent = "Paste the reply first."; return; }
+    try {
+      const r = await api("/api/assist/import", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({question: a.question, response: reply, provider: assistProvider})
+      });
+      box.innerHTML = "<strong>Manual web assist</strong><br>" + esc(reply) +
+        '<span class="meta">saved to memory as episode ' + r.episode +
+        " · via " + esc(assistProvider) + " (web)</span>";
+      loadStatus();
+    } catch (e) { box.querySelector(".assist-status").textContent = "Failed: " + e.message; }
+  };
+  log.appendChild(box);
+  box.scrollIntoView();
+}
+
+/* today */
+async function loadToday(){
+  try {
+    const [b, t] = await Promise.all([api("/api/brief"), api("/api/timeline")]);
+    $("brief").textContent = b.brief;
+    $("episodes").innerHTML = t.episodes.length
+      ? t.episodes.map(e =>
+          '<div class="row"><span class="t">' + fmtTime(e.start_ts) +
+          '</span><span style="flex:1">' + esc(e.summary) + "</span></div>"
+        ).join("")
+      : '<span class="quiet">No episodes yet today — press “Build episodes now”.</span>';
+    // WindowSensor records finished spans: each row is time SPENT in that
+    // window before the user switched away.
+    const evs = t.events.slice().reverse();
+    $("events").innerHTML = evs.length
+      ? evs.map(e =>
+          '<div class="row"><span class="t">' + fmtTime(e.ts) + "</span>" +
+          '<span class="d">' + (e.source === "window" ? fmtDur(e.dur_s) : e.source) +
+          '</span><span style="flex:1">' +
+          esc((e.app || "") + (e.title ? " — " + e.title : "")) + "</span></div>"
+        ).join("")
+      : '<span class="quiet">No activity recorded yet.</span>';
+  } catch (e) {
+    $("today-msg").textContent = "Failed to load: " + e.message;
+  }
+}
+$("refresh-today").onclick = loadToday;
+$("episodize-now").onclick = async () => {
+  $("today-msg").textContent = "Building…";
+  try {
+    const r = await api("/api/episodize", {method: "POST"});
+    $("today-msg").textContent = r.created + " episode(s) created.";
+    loadToday(); loadStatus();
+  } catch (e) { $("today-msg").textContent = "Failed: " + e.message; }
+};
+$("resume-now").onclick = async () => {
+  try {
+    const r = await api("/api/resume");
+    const c = $("resume-card");
+    c.style.display = "block";
+    c.innerHTML = "<strong>" + esc(r.summary) + "</strong>" + (r.events.length
+      ? "<div class='quiet' style='margin-top:8px'>" + r.events.map(e =>
+          fmtTime(e.ts) + " · " + esc((e.app || "") +
+          (e.title ? " — " + e.title : ""))).join("<br>") + "</div>" : "");
+  } catch (e) { $("today-msg").textContent = "Failed: " + e.message; }
+};
+
+/* memory */
+async function loadFacts(){
+  try {
+    const r = await api("/api/facts");
+    $("factlist").innerHTML = r.facts.length
+      ? r.facts.map(f =>
+          '<div class="card ep"><div class="body">' +
+          '<div class="when">' + esc(f.day) + " · fact " + f.id + "</div>" +
+          esc(f.text) + "</div>" +
+          '<button class="btn danger" data-delfact="' + f.id + '">Delete</button></div>'
+        ).join("")
+      : '<div class="quiet">No facts yet — they build up daily from past activity, or press “Distill facts now”.</div>';
+  } catch (e) {
+    $("factlist").innerHTML = '<div class="quiet">Failed to load facts.</div>';
+  }
+}
+async function loadMemory(){
+  loadFacts();
+  const q = $("meminput").value.trim();
+  try {
+    const r = await api("/api/memory?q=" + encodeURIComponent(q));
+    $("memlist").innerHTML = r.episodes.length
+      ? r.episodes.map(e =>
+          '<div class="card ep"><div class="body">' +
+          '<div class="when">' + fmtWhen(e.start_ts) + " – " + fmtTime(e.end_ts) +
+          " · episode " + e.id + "</div>" + esc(e.summary) + "</div>" +
+          '<button class="btn danger" data-del="' + e.id + '">Delete</button></div>'
+        ).join("")
+      : '<div class="quiet">No memories' + (q ? " matching “" + esc(q) + "”" : "") + ".</div>";
+  } catch (e) {
+    $("memlist").innerHTML = '<div class="quiet">Failed to load: ' + esc(e.message) + "</div>";
+  }
+}
+$("memform").onsubmit = ev => { ev.preventDefault(); loadMemory(); };
+$("memlist").onclick = async ev => {
+  const id = ev.target.dataset && ev.target.dataset.del;
+  if (!id) return;
+  if (!confirm("Permanently delete episode " + id + " from memory?")) return;
+  await api("/api/memory/" + id, {method: "DELETE"});
+  loadMemory(); loadStatus();
+};
+$("factlist").onclick = async ev => {
+  const id = ev.target.dataset && ev.target.dataset.delfact;
+  if (!id) return;
+  if (!confirm("Permanently delete fact " + id + "?")) return;
+  await api("/api/facts/" + id, {method: "DELETE"});
+  loadFacts();
+};
+$("consolidate-now").onclick = async () => {
+  try {
+    const r = await api("/api/consolidate", {method: "POST"});
+    loadFacts();
+    if (!r.created) alert("No new facts — past days are already distilled.");
+  } catch (e) { alert("Failed: " + e.message); }
+};
+
+/* privacy */
+async function loadPrivacy(){
+  try {
+    const [c, e] = await Promise.all([api("/api/config"), api("/api/egress")]);
+    $("cfg-window").checked = !!c.config.window_sensor;
+    $("cfg-file").checked = !!c.config.file_sensor;
+    $("cfg-cloud").checked = !!c.config.cloud_enabled;
+    $("cfg-paid").checked = !!c.config.paid_apis;
+    $("cfg-git").checked = !!c.config.git_sensor;
+    $("cfg-repos").value = (c.config.git_repos || []).join("\n");
+    $("cfg-folders").value = (c.config.watched_folders || []).join("\n");
+    $("cloud-status").textContent = "Status: " + e.cloud_status;
+    $("cloud-hint").textContent = $("chat-cloud") && e.cloud_enabled ? "" : "";
+    $("egress-expl").textContent = e.explanation;
+    $("egress-rows").innerHTML = e.rows.length
+      ? e.rows.map(r =>
+          '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' +
+          '<div class="row" style="border:none;padding:2px 0"><span class="t">' +
+          fmtWhen(r.ts) + '</span><span class="d" style="color:' +
+          (r.allowed ? "var(--warn)" : "var(--dim)") + '">' +
+          (r.allowed ? "SENT → " + esc(r.destination) : "blocked") +
+          '</span><span style="flex:1"></span></div>' +
+          '<div class="quiet" style="font-family:monospace;font-size:12px;' +
+          'white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto">' +
+          esc(r.payload) + "</div></div>").join("")
+      : '<div class="quiet">Egress log is empty — zero records of data leaving this machine.</div>';
+  } catch (err) { /* header dot already reflects core state */ }
+}
+$("cfg-save").onclick = async () => {
+  const body = {
+    window_sensor: $("cfg-window").checked,
+    file_sensor: $("cfg-file").checked,
+    cloud_enabled: $("cfg-cloud").checked,
+    paid_apis: $("cfg-paid").checked,
+    git_sensor: $("cfg-git").checked,
+    git_repos: $("cfg-repos").value.split("\n").map(s => s.trim()).filter(Boolean),
+    watched_folders: $("cfg-folders").value.split("\n").map(s => s.trim()).filter(Boolean)
+  };
+  const r = await api("/api/config", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)
+  });
+  alert(r.note);
+};
+$("git-import").onclick = async () => {
+  const repos = $("cfg-repos").value.split("\n").map(s => s.trim()).filter(Boolean);
+  if (!repos.length) { $("git-import-msg").textContent = "Add a repo path first."; return; }
+  $("git-import-msg").textContent = "Importing commit history…";
+  try {
+    const r = await api("/api/git/import", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({repos})
+    });
+    $("git-import-msg").textContent =
+      r.imported + " commit(s) imported. Press “Build episodes now” on Today to group them.";
+    loadStatus();
+  } catch (e) { $("git-import-msg").textContent = "Failed: " + e.message; }
+};
+</script>
+</body>
+</html>

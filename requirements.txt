@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+watchdog
+
+# dev/test only:
+# pytest
+# httpx

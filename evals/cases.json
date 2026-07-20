@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "threshold": 0.95,
+  "notes": "Golden retrieval eval. Scoring looks at the ACTIVITY context memory.retrieve() returns — items of type 'fact' and 'episode'. Prior Q&A comes back as type 'assist' (reference only) and is never part of the scored set, so listing an assist- label in must_not_retrieve asserts it stayed out of activity retrieval. Today's raw events are returned unconditionally and carry no label, so they are not scored.",
+  "cases": [
+    {
+      "id": "fts5-docs-vs-prior-answers",
+      "question": "what have I been reading about sqlite fts5 bm25 ranking?",
+      "must_retrieve": ["ep-docs-fts5"],
+      "must_not_retrieve": ["assist-fts5-rank", "assist-bm25-weights", "assist-fts-index", "assist-fts-tokenizer"],
+      "notes": "The regression case: six manual-assist episodes are the newest rows and match these terms hard, so they used to take most of the 8 episode slots and pushed the one real browsing episode out."
+    },
+    {
+      "id": "multi-topic-crowdout",
+      "question": "what have I been doing with sqlite ranking, stripe webhooks and pdf invoices?",
+      "must_retrieve": ["ep-browse-stripe", "ep-docs-fts5", "ep-invoicer-pdf"],
+      "must_not_retrieve": ["assist-pdf-lib", "assist-webhook-retry"],
+      "notes": "Crowd-out proof: a broad query where six prior Q&A episodes take six of the eight episode slots, pushing real coding activity off the end of the list. Recall here is 2/3 before the fix."
+    },
+    {
+      "id": "invoicer-project",
+      "question": "what did I work on in the invoicer project?",
+      "must_retrieve": ["ep-invoicer-pdf", "ep-invoicer-tax"],
+      "must_not_retrieve": ["assist-pdf-lib"],
+      "notes": "Two coding sessions on the second project, on different days."
+    },
+    {
+      "id": "stripe-webhooks",
+      "question": "when was I looking at stripe webhooks?",
+      "must_retrieve": ["ep-browse-stripe"],
+      "must_not_retrieve": ["assist-webhook-retry"],
+      "notes": "Browsing docs must win over the answer PIOS gave about the same topic."
+    },
+    {
+      "id": "email-invoice-reminder",
+      "question": "did I get an email about an overdue invoice?",
+      "must_retrieve": ["ep-email-invoices"],
+      "must_not_retrieve": [],
+      "notes": "Outlook titles only; PIOS never reads message bodies."
+    },
+    {
+      "id": "pios-coding",
+      "question": "what have I done on the pios project?",
+      "must_retrieve": ["ep-pios-schema", "ep-pios-retrieval", "ep-today-pios"],
+      "must_not_retrieve": [],
+      "notes": "Multi-day recall across three sessions on one project."
+    },
+    {
+      "id": "which-projects-fact",
+      "question": "which projects am I coding on in Visual Studio Code?",
+      "must_retrieve": ["fact-vscode-projects"],
+      "must_not_retrieve": [],
+      "notes": "Consolidated facts must surface, not just episodes."
+    },
+    {
+      "id": "tax-rates",
+      "question": "tax rates",
+      "must_retrieve": ["ep-invoicer-tax"],
+      "must_not_retrieve": [],
+      "notes": "Bare keyword query, no question framing."
+    }
+  ]
+}

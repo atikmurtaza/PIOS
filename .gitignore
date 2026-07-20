@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment (rebuilt from requirements.txt)
+.venv/
+
+# PIOS runtime data — NEVER commit: this is the user's personal memory.
+# It normally lives in %LOCALAPPDATA%\PIOS, but guard against a stray copy
+# or a PIOS_DB override pointing into the repo.
+*.db
+*.db-wal
+*.db-shm
+config.json
+pios.db*
+
+# Secrets — keys belong in environment variables, never in the repo
+.env
+*.key
+
+# Private: roadmap, business strategy, future-version plans. Local only —
+# this repo documents the CURRENT version of the code and nothing else.
+private/
+
+# OS / editor
+desktop.ini
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
