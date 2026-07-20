@@ -49,11 +49,11 @@ def _idle_seconds() -> float:
     return ((_kernel32.GetTickCount64() - lii.dwTime) & 0xFFFFFFFF) / 1000.0
 
 
-def _foreground() -> tuple[str, str]:
-    """(app_basename, window_title) of the foreground window; '' on failure."""
+def _foreground() -> tuple[int, str, str]:
+    """(hwnd, app_basename, window_title) of the foreground window; 0/'' on failure."""
     hwnd = _user32.GetForegroundWindow()
     if not hwnd:
-        return '', ''
+        return 0, '', ''
     n = _user32.GetWindowTextLengthW(hwnd)
     buf = ctypes.create_unicode_buffer(n + 1)
     _user32.GetWindowTextW(hwnd, buf, n + 1)
@@ -70,7 +70,7 @@ def _foreground() -> tuple[str, str]:
                 app = os.path.basename(pbuf.value)
         finally:
             _kernel32.CloseHandle(handle)
-    return app, title
+    return hwnd, app, title
 
 
 class WindowSensor:
@@ -83,14 +83,16 @@ class WindowSensor:
     """
 
     def __init__(self, emit: Callable[[dict], None], poll_s: float = 3.0,
-                 idle_s: float = 120):
+                 idle_s: float = 120, config: dict | None = None):
         self.emit = emit
         self.poll_s = poll_s
         self.idle_s = idle_s
+        self.config = config or {}   # only read for opt-in UIA enrichment
         self._stop = threading.Event()
         self._thread = None
         self._cur = None        # (app, title) currently focused, or None
         self._cur_since = 0.0
+        self._cur_detail = ''   # UIA enrichment captured when focus was gained
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name='pios-window-sensor',
@@ -113,7 +115,7 @@ class WindowSensor:
         if _idle_seconds() > self.idle_s:
             self._finalize(now)  # close the span; emit nothing while idle
             return
-        app, title = _foreground()
+        hwnd, app, title = _foreground()
         if not title or 'PIOS' in title:  # skip empty titles and our own UI
             return
         key = (app, title)
@@ -122,13 +124,27 @@ class WindowSensor:
         self._finalize(now)   # emit the previous window's span with its duration
         self._cur = key
         self._cur_since = now
+        self._cur_detail = self._enrich(hwnd, app, title)
+
+    def _enrich(self, hwnd: int, app: str, title: str) -> str:
+        """Opt-in UIA text for the window just focused. Off/failing == ''."""
+        try:
+            from . import uia
+            return uia.detail_for(hwnd, app, title, self.config)
+        except Exception as e:  # enrichment is never allowed to cost us an event
+            _log(f'uia enrich failed: {e!r}')
+            return ''
 
     def _finalize(self, now: float) -> None:
         if self._cur:
             app, title = self._cur
-            self.emit({'source': 'window', 'app': app, 'title': title,
-                       'ts': now, 'dur_s': round(now - self._cur_since, 1)})
+            ev = {'source': 'window', 'app': app, 'title': title,
+                  'ts': now, 'dur_s': round(now - self._cur_since, 1)}
+            if self._cur_detail:  # absent entirely when enrichment is off
+                ev['detail'] = self._cur_detail
+            self.emit(ev)
         self._cur = None
+        self._cur_detail = ''
 
 
 class FolderSensor:
@@ -198,7 +214,7 @@ def start_all(config: dict, emit: Callable[[dict], None]) -> list:
     started = []
     if config.get('window_sensor', True):
         ws = WindowSensor(emit, poll_s=config.get('poll_seconds', 3.0),
-                          idle_s=config.get('idle_seconds', 120))
+                          idle_s=config.get('idle_seconds', 120), config=config)
         ws.start()
         started.append(ws)
     folders = config.get('watched_folders') or []

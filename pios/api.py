@@ -5,11 +5,13 @@ serves requests from a threadpool, so every request opens its own connection
 (cheap with WAL) via the `con` dependency.
 """
 import os
+import secrets
 import time
+from urllib.parse import urlsplit
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import __version__, config, db, gate, llm, memory
 
@@ -54,6 +56,41 @@ class AssistImportIn(BaseModel):
 class GitImportIn(BaseModel):
     repos: list[str] = []
     since_days: int = 90
+
+
+MAX_VISIT_S = 8 * 3600      # a laptop sleeping mid-tab must not log a 20h visit
+MAX_BROWSER_BATCH = 50
+MAX_BROWSER_BODY = 256 * 1024
+
+
+class BrowserVisit(BaseModel):
+    url: str = Field(max_length=2048)
+    title: str = Field(default="", max_length=512)
+    dur_s: float = 0.0
+
+
+class BrowserIn(BaseModel):
+    token: str = ""
+    events: list[BrowserVisit] = []
+
+
+def browser_token() -> str:
+    """The shared secret the extension must present. Generated once on first
+    use and persisted, because /api/events/browser is reachable from any page
+    the user visits and must not accept anonymous writes."""
+    cfg = config.load()
+    tok = cfg.get("browser_token") or ""
+    if not tok:
+        tok = secrets.token_urlsafe(24)
+        cfg["browser_token"] = tok
+        config.save(cfg)
+    return tok
+
+
+def _blocked(host: str, blocklist) -> bool:
+    host = (host or "").lower()
+    return any(host == d or host.endswith("." + d)
+               for d in (str(x).lower().strip() for x in blocklist) if d)
 
 
 @app.get("/")
@@ -165,6 +202,61 @@ def git_import(body: GitImportIn, con=Depends(_con)):
     return {"imported": added, "repos": len(repos)}
 
 
+@app.post("/api/events/browser")
+async def browser_events(body: BrowserIn, request: Request, con=Depends(_con)):
+    """Ingest completed browser visits from the extension.
+
+    Untrusted boundary: any web page the user visits can reach this port, so
+    (a) a shared token is required, (b) the JSON content type forces a CORS
+    preflight that a cross-origin page cannot satisfy (no CORS middleware is
+    installed — the extension uses host_permissions and needs none), and
+    (c) the domain blocklist is re-applied here, never trusting the client.
+    """
+    try:
+        if int(request.headers.get("content-length") or 0) > MAX_BROWSER_BODY:
+            raise HTTPException(413, "payload too large")
+    except ValueError:
+        raise HTTPException(400, "bad content-length")
+    if not secrets.compare_digest(body.token or "", browser_token()):
+        raise HTTPException(401, "bad or missing browser token")
+    if len(body.events) > MAX_BROWSER_BATCH:
+        raise HTTPException(413, "batch too large")
+
+    cfg = config.load()
+    if not cfg.get("browser_sensor", True):
+        return {"stored": 0, "skipped": len(body.events), "sensor": "off"}
+
+    blocklist = cfg.get("blocked_domains", [])
+    stored = 0
+    for v in body.events:
+        parts = urlsplit(v.url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            continue
+        if _blocked(parts.hostname, blocklist):
+            continue
+        host = parts.hostname.lower()
+        db.insert_event(con, {
+            "source": "browser",
+            "app": host[4:] if host.startswith("www.") else host,
+            "title": v.title.strip() or v.url,
+            "detail": v.url,
+            "ts": time.time(),
+            "dur_s": max(0.0, min(float(v.dur_s), MAX_VISIT_S)),
+        })
+        stored += 1
+    return {"stored": stored, "skipped": len(body.events) - stored}
+
+
+@app.get("/api/extension/config")
+def extension_config():
+    """Readable without the token on purpose: it leaks nothing (the blocklist
+    is a list of well-known domains, not user data) and the extension needs it
+    before the user has pasted a token in."""
+    cfg = config.load()
+    return {"blocked_domains": cfg.get("blocked_domains", []),
+            "browser_sensor": cfg.get("browser_sensor", True)}
+
+
 @app.post("/api/consolidate")
 def consolidate(con=Depends(_con)):
     return {"created": memory.consolidate(con)}
@@ -187,6 +279,7 @@ def egress(con=Depends(_con)):
 
 @app.get("/api/config")
 def config_get():
+    browser_token()  # generate on first read so the UI can always show one
     return {"config": config.load(),
             "note": "Sensor changes take effect after restarting PIOS."}
 

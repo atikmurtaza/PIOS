@@ -4,6 +4,20 @@ import os
 
 DEFAULTS = {'watched_folders': [], 'window_sensor': True, 'file_sensor': True,
             'git_repos': [], 'git_sensor': True,
+            # Browser extension (Phase 1): real URLs/titles instead of
+            # "msedge.exe". blocked_domains is never recorded at all — the
+            # filter runs in the extension AND again at ingest.
+            'browser_sensor': True,
+            'blocked_domains': ['accounts.google.com', 'login.microsoftonline.com',
+                                'paypal.com', 'bankofamerica.com', 'chase.com',
+                                'hsbc.co.uk', 'barclays.co.uk', 'lloydsbank.com',
+                                'monzo.com', 'revolut.com', 'coinbase.com',
+                                '1password.com', 'bitwarden.com', 'lastpass.com'],
+            'browser_token': '',        # set on first run; extension must send it
+            # UI Automation enrichment (Phase 2): reads on-screen TEXT (not
+            # pixels) from apps you opt into. OFF by default and per-app —
+            # this reads content, not just window titles.
+            'uia_enrich': False, 'uia_apps': [],
             'poll_seconds': 3.0, 'idle_seconds': 120, 'model': 'gemma3:4b',
             'cloud_enabled': False, 'anthropic_model': 'claude-opus-4-8',
             # gemini-2.5-flash and the 2.0 line are retired/quota-zeroed for

@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>PIOS Browser Sensor</title>
+<style>
+ body{font:14px/1.5 system-ui,sans-serif;max-width:520px;margin:32px auto;padding:0 16px;color:#e6e6e6;background:#16181c}
+ h1{font-size:18px;margin:0 0 4px} p{color:#9aa0a6}
+ label{display:block;margin:14px 0 4px}
+ input{width:100%;padding:8px;border:1px solid #33363b;border-radius:6px;background:#101216;color:#e6e6e6;font-family:monospace}
+ button{margin-top:16px;padding:8px 14px;border:1px solid #33363b;border-radius:6px;background:#22252a;color:#e6e6e6;cursor:pointer}
+ #status{margin-top:14px;font-weight:600}
+ .ok{color:#5cd68a} .bad{color:#ff8b6b} .dim{color:#9aa0a6}
+</style></head><body>
+<h1>PIOS Browser Sensor</h1>
+<p>Sends completed page visits (URL, title, time spent) to PIOS on this machine.
+   Nothing is sent anywhere else.</p>
+<label for="token">PIOS token <span class="dim">— copy it from PIOS → Privacy tab</span></label>
+<input id="token" type="text" placeholder="paste token here" spellcheck="false">
+<label for="port">Port</label>
+<input id="port" type="number" value="8321">
+<button id="save">Save &amp; test connection</button>
+<div id="status" class="dim">Not tested yet.</div>
+<script src="options.js"></script>
+</body></html>

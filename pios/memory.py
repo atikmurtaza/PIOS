@@ -66,7 +66,7 @@ def episodize(con, now=None):
     now = now if now is not None else time.time()
     rows = con.execute(
         "SELECT * FROM events WHERE episodized = 0 "
-        "AND source IN ('window','file','git') AND ts < ? ORDER BY ts",
+        "AND source IN ('window','file','git','browser') AND ts < ? ORDER BY ts",
         (now - EPISODIZE_MIN_AGE_S,)).fetchall()
     if not rows:
         return 0

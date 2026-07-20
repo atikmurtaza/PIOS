@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "PIOS Browser Sensor",
+  "version": "0.1.0",
+  "description": "Sends the page titles and URLs you visit to your local PIOS instance (127.0.0.1 only). Nothing else leaves the browser.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html"
+}
