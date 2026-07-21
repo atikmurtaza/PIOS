@@ -23,6 +23,10 @@ pios.db*
 # this repo documents the CURRENT version of the code and nothing else.
 private/
 
+# Session continuation brief: roadmap, validation plan, account state.
+# Same class of content as private/ — kept local, not published.
+PROJECT_CONTEXT.md
+
 # OS / editor
 desktop.ini
 Thumbs.db
